@@ -2,6 +2,7 @@
 # Ignore BIDS rawdata and derivatives (stored elsewhere, or synced separately)
 rawdata/
 derivatives/
+Electrode_locations/
 
 # Ignore system files
 .DS_Store
