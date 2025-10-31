@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import csv
-import re
 from bids import BIDSLayout
 
 
@@ -81,6 +79,7 @@ def process_channels(sub: str, ses: str, row: pd.Series, project_path: Path) -> 
 project_path = Path("/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo")
 # initialize PyBIDS layout & load participant, session metadata
 layout = BIDSLayout(project_path / "rawdata", validate=False)
+# TODO: rewrite paths to participants and session using layout
 participants = pd.read_csv(project_path / "rawdata" / "participants.tsv", sep="\t")
 sessions = pd.read_csv(project_path / "rawdata" / "sessions.tsv", sep="\t")
 sessions = sessions[sessions["exclude"] == 0]
