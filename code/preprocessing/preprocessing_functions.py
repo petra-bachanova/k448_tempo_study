@@ -200,4 +200,4 @@ def log_runtime_info(start_time, end_time):
 def save_preprocessed_data(preprocessed_data, path):
     """Save the preprocessed iEEG data."""
     header = ','.join(preprocessed_data.ch_names)
-    np.savetxt(fname=path, X=preprocessed_data.get_data().T, delimiter=',', header=header)
+    np.savetxt(fname=path, X=preprocessed_data.get_data().T, delimiter=',', header=header, comments="")

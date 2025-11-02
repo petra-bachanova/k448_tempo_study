@@ -6,13 +6,14 @@
 #SBATCH -N 1                                                                # Total # of nodes
 #SBATCH -n 1                                                                # Total # of mpi tasks
 #SBATCH -c 2                                                                # Allocate # of CPUs per task
+#SBATCH --mem=32G                                                           # Allocate memory
 #SBATCH -t 02:00:00                                                         # Run time (hh:mm:ss)
 #SBATCH --mail-type=END,FAIL                                                # Get email on job end or fail
 #SBATCH --mail-user=petra.bachanova.gr@dartmouth.edu                        # Where to send email
 # --------------------------------------------------------------------------------------------------------
 
-export SUBJECT="sub-32"
-export SESSION="ses-01"
+export SUBJECT="sub-18"
+export SESSION="ses-02"
 export FULLID="${SUBJECT}_${SESSION}"
 
 PROJECT_PATH="/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
@@ -29,4 +30,4 @@ echo "SLURM_JOB_NUM_NODES: $SLURM_JOB_NUM_NODES"
 echo "SLURM_NTASKS: $SLURM_NTASKS"
 echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"
 
-python3 /dartfs-hpc/rc/lab/E/ECoG/music_study_tempo/code/preprocessing/preprocessing_run.py
+python3 ${PROJECT_PATH}/code/preprocessing/preprocessing_run.py

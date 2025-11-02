@@ -1,24 +1,18 @@
-from time import time
-import os
-from pathlib import Path
-from bids import BIDSLayout
 from preprocessing_functions import *
+import time
+import os
 
-# SETUP
+# SETUP & PATHS
 # --------------------------
 # sub = 'sub-17'
 # ses = 'ses-01'  # use a leading 0 i.e. "01" instead of "1"
 sub = os.getenv("SUBJECT")
 ses = os.getenv("SESSION")  # use a leading 0 i.e. "01" instead of "1"
 
-project_path = Path("/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo")
-# initialise BIDS lauout and locate participant data
-layout = BIDSLayout(project_path / "rawdata")
-bids_query = {"subject": sub.removeprefix("sub-"), "session": ses.removeprefix("ses-")} # type: ignore[arg-type]
-bids_sub_dir = Path(layout.get(**bids_query, extension = ".edf")[0].dirname) # type: ignore[arg-type]
-# derivatives directory for this participant/session
-deriv_sub_dir = project_path / "derivatives" / "preprocessing" / sub / ses # type: ignore[arg-type]
-deriv_sub_dir.mkdir(parents=True, exist_ok=True)
+project_path = "/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
+bids_sub_dir = f"{project_path}/rawdata/{sub}/{ses}/ieeg"
+deriv_sub_dir = f"{project_path}/derivatives/preprocessing/{sub}/{ses}"
+os.makedirs(deriv_sub_dir, exist_ok=True)
 # --------------------------
 
 
