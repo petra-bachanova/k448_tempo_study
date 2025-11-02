@@ -12,9 +12,9 @@
 #SBATCH --mail-user=petra.bachanova.gr@dartmouth.edu                        # Where to send email
 # --------------------------------------------------------------------------------------------------------
 
-export SUBJECT="17"
-export SESSION="01"
-export FULLID="sub-${SUBJECT}_ses-${SESSION}"
+export SUBJECT="sub-32"
+export SESSION="ses-01"
+export FULLID="${SUBJECT}_${SESSION}"
 
 PROJECT_PATH="/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
 LAUNCHER_OUTPUT_DIR="${PROJECT_PATH}/derivatives/spike_detection/launcher_output"
