@@ -1,10 +1,7 @@
-from bids import BIDSLayout
-from pathlib import Path
+from spike_detection_functions import *
 from time import time
-import pandas as pd
 import logging
 import os
-from spike_detection_functions import *
 
 
 # SETUP
