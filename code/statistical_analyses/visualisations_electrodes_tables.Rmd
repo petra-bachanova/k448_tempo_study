@@ -1,0 +1,193 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-10-10"
+---
+
+```{r}
+library(readxl)
+library(table1)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(glue)
+```
+
+### Load data
+```{r}
+project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
+# get participant metadata
+participants_path <- file.path(project_path, "rawdata", "participants.tsv")
+participants <- read_tsv(participants_path)
+sessions <- read_tsv(file.path(project_path, "rawdata", "sessions.tsv")) %>% filter(exclude == 0)
+meta <- left_join(sessions, participants, by = "participant_id")
+```
+
+```{r}
+# Only show median with IQR
+my.render.cont <- function(x) {
+  s <- stats.apply.rounding(stats.default(x), digits=2)
+  with(s, c("", 
+            "Median (IQR)" = sprintf("%s (%s–%s)", MEDIAN, Q1, Q3)))}
+
+participants_no_nans = participants %>% filter(exclude==0)
+participants_no_nans$prior_epi_surg <- as.character(participants_no_nans$prior_epi_surg)
+participants_no_nans$include_soz_analysis <- as.character(participants_no_nans$include_soz_analysis)
+participants_no_nans$asm_home_num <- as.character(participants_no_nans$asm_home_num)
+participants_no_nans$rns_after <- as.character(participants_no_nans$rns_after)
+participants_no_nans$destructive_surgery_after <- as.character(participants_no_nans$destructive_surgery_after)
+
+
+table1(~ sex + age_study + 
+         age_onset + 
+         prior_epi_surg + 
+         include_soz_analysis +
+         asm_home_num + 
+         hyp_post_laterality + 
+         hyp_post_location + 
+         rns_after + 
+         destructive_surgery_after +
+         Engel_6_months_simple, data=participants_no_nans, 
+       render.continuous=my.render.cont)
+```
+
+```{r}
+# Load spike detection output
+# patient_ids <- meta[meta$include_SOZ_analysis==1, "id_mus"]
+patient_ids = c("Mus17", "Mus18", "Mus19", "Mus22", "Mus30", "Mus31", "Mus32")
+
+n = 7
+
+soz_electrodes <- meta[meta$id_mus == patient_ids[n], "seeg_SOZ_contacts"]
+soz_electrodes <- strsplit(gsub("\\s+", "", soz_electrodes), ",")[[1]]
+
+id <- gsub("[^0-9]", "", patient_ids[n])
+
+spikes <- read_excel(glue("../Data/sub-{id}/ses-01/eeg/sub-{id}_ses-01_spike_detection.xlsx"))
+spikes <- spikes %>%
+  mutate(
+    channels_names = str_remove_all(channels_names, "\\[|\\]|'"),  # remove brackets and quotes
+    channels_names = str_trim(channels_names),                    # remove any extra spaces
+    channels_names = strsplit(channels_names, ",\\s*")            # split by comma + optional spaces
+  )
+
+
+counts <- spikes[, c("spike_start", "channels_names")] %>%
+  unnest(channels_names) %>%
+  count(channels_names, sort = TRUE)
+
+counts = as.data.frame(counts)
+counts$SOZ <- ifelse(counts$channels_names %in% soz_electrodes, "yes", "no")
+counts$patient <- patient_ids[n]
+
+perc_ch_in_SOZ <- table(counts$SOZ)["yes"]*100 / (table(counts$SOZ)["yes"] + table(counts$SOZ)["no"])
+```
+
+```{r}
+library(tidyverse)
+library(glue)
+library(readxl)
+
+patient_ids <- c("Mus17", "Mus18", "Mus19", "Mus22", "Mus30", "Mus31", "Mus32")
+
+# Iterate over each patient and combine results into one data frame
+all_counts <- map_dfr(patient_ids, function(pid) {
+  
+  # Extract numeric ID for file paths
+  id <- gsub("[^0-9]", "", pid)
+  
+  # Get SOZ electrodes for this patient
+  soz_electrodes <- meta %>%
+    filter(id_mus == pid) %>%
+    pull(seeg_SOZ_contacts) %>%
+    gsub("\\s+", "", .) %>%
+    strsplit(",") %>%
+    unlist()
+  
+  # Read spikes data
+  spikes <- read_excel(glue("../Data/sub-{id}/ses-01/eeg/sub-{id}_ses-01_spike_detection.xlsx"))
+  
+  # Clean and expand channel names
+  spikes <- spikes %>%
+    mutate(
+      channels_names = str_remove_all(channels_names, "\\[|\\]|'"),
+      channels_names = str_trim(channels_names),
+      channels_names = strsplit(channels_names, ",\\s*")
+    )
+  
+  # Count spikes per channel
+  counts <- spikes %>%
+    select(spike_start, channels_names) %>%
+    unnest(channels_names) %>%
+    count(channels_names, sort = TRUE)
+  
+  # Label SOZ membership
+  counts <- counts %>%
+    mutate(
+      SOZ = if_else(channels_names %in% soz_electrodes, "yes", "no"),
+      patient = pid
+    )
+  
+  # Calculate % electrodes in SOZ (optional summary column)
+  perc_ch_in_SOZ <- sum(counts$SOZ == "yes") * 100 / nrow(counts)
+  counts$perc_ch_in_SOZ <- perc_ch_in_SOZ
+  
+  counts
+})
+
+```
+```{r}
+summary_df <- all_counts %>%
+  group_by(patient) %>%
+  summarise(
+    total_electrodes = n_distinct(channels_names),
+    electrodes_in_SOZ = sum(SOZ == "yes"),
+    perc_in_SOZ = unique(perc_ch_in_SOZ)
+  )
+```
+
+
+
+```{r}
+library(ggplot2)
+
+
+counts_summary <- all_counts %>%
+  group_by(SOZ) %>%
+  summarise(
+    mean_n = mean(n),
+    se_n = sd(n) / sqrt(n())
+  )
+
+ggplot(all_counts, aes(x = SOZ, y = n, fill = SOZ)) +
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) +  # boxplot without outliers
+  geom_point(position = position_jitter(width = 0.15), size = 2) +  # show actual points
+  geom_errorbar(
+    data = counts_summary,
+    aes(x = SOZ, ymin = mean_n - se_n, ymax = mean_n + se_n),
+    width = 0.2,
+    color = "black"
+  ) +
+  theme_minimal() +
+  labs(
+    x = "SOZ vs nSOZ contacts",
+    y = "Number of spikes",
+    fill = "SOZ",
+    title = "Number of spikes in SOZ vs nSOZ contacts"
+  ) +
+  labs(x = "SOZ", y = "n", fill = "SOZ") +
+  scale_fill_manual(values = c("yes" = "red", "no" = "blue"))
+
+
+wilcox.test(n ~ SOZ, data = all_counts)
+
+```
+
+
+```{r}
+ggplot(counts, aes(x = SOZ, y = n, fill = SOZ)) +
+  geom_violin(alpha = 0.5, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(width = 0.2, height = 0, alpha = 0.5, size = 2) +
+  theme_minimal()
+
+```

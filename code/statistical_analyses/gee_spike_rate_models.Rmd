@@ -1,0 +1,252 @@
+---
+
+title: "gee_spike_rate_models"
+output: html_document
+date: "2025-11-03"
+---
+
+### Libraries
+```{r}
+library(ggplot2)
+library(readr)
+library(glue)
+library(dplyr)
+library(tidyr)
+library(geepack)
+library(car)
+library(geepack)
+library(purrr)
+library(table1)
+```
+
+### Load data
+```{r}
+project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
+# get participant metadata
+participants_path <- file.path(project_path, "rawdata", "participants.tsv")
+participants <- read_tsv(participants_path)
+sessions <- read_tsv(file.path(project_path, "rawdata", "sessions.tsv")) %>% filter(exclude == 0)
+meta <- left_join(sessions, participants, by = "participant_id")
+meta$ID <- paste0(meta$participant_id, "_", meta$session)
+```
+
+```{r}
+# read in all participants' spike rates
+sr_files <- meta %>%
+  mutate(sr_path = file.path(project_path,
+                             "derivatives",
+                             "calculated_spike_rates",
+                             participant_id,
+                             session,
+                             paste0(participant_id, "_", session, "_calculated_spike_rates.csv")))
+
+sr_merged <- sr_files %>%
+  mutate(data = map2(participant_id, session, ~ {
+    path <- file.path(project_path,
+                      "derivatives",
+                      "calculated_spike_rates",
+                      .x, .y,
+                      paste0(.x, "_", .y, "_calculated_spike_rates.csv"))
+    if (file.exists(path)) {
+      df <- read_csv(path)
+      df$ID <- paste(.x, .y, sep = "_")
+      return(df)
+    } else {
+      warning(paste("File not found:", path))
+      return(NULL)
+    }
+  })) %>%
+  pull(data) %>%
+  bind_rows()
+```
+
+```{r}
+# Plot line chart with baseline bins across participants -> identify non-spikers
+sr_bs <- sr_merged[sr_merged$event=="pre-exp baseline", ]
+sr_bs <- sr_bs %>%
+  mutate(time_bin = factor(time_bin, levels = unique(time_bin)))
+
+ggplot(sr_bs, aes(x = time_bin, y = rate_all, color = ID, group = ID)) +
+  geom_line(size=1.3) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    x = "Time bin",
+    y = "Spike rate (all contacts)",
+    color = "Subject ID",
+    title = "Spike rates across time bins"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  ) + scale_color_brewer(palette = "Dark2")
+```
+
+
+### Boxplot
+```{r}
+ggplot(sr_bs, aes(x = reorder(ID, rate_all, median), y = rate_all)) +
+  geom_boxplot(fill = "#b6b5d8", alpha = 1, outlier.shape = 16, outlier.alpha = 0.6) +
+  geom_hline(yintercept = 1/15, linetype = "dashed", color = "red") +
+  ggtitle(label = "Participants' spike rate at baseline",
+          subtitle = "Red dashed line = 0.067 IED/s (1 IED per 15s)") +
+  ylab("IEDs / second") +
+  xlab("Participant ID") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, color = "black"),
+    plot.subtitle = element_text(hjust = 0.5, color = "black"),
+    axis.title = element_text(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+    axis.text.y = element_text(color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+```{r}
+sr_formatted <- sr_merged %>% 
+  filter(!(ID %in% c('sub-20_ses-01', 'sub-26_ses-01'))) %>%
+  group_by(ID) %>%
+  mutate(median_baseline = median(rate_all[event == "pre-exp baseline"], na.rm = TRUE)) %>%
+  ungroup()
+
+sr_formatted <- left_join(sr_formatted, meta[, c("ID", "age_study", "sex", "asm_study_simple")], by = "ID")
+sr_formatted <- sr_formatted[, c("ID", "age_study", "sex", "asm_study_simple", "event", "time_bin", "median_baseline", "rate_all", "rate_SOZ", "rate_nSOZ")]
+
+head(sr_formatted)
+```
+
+### Model 1: global spike rates ~ song + other covs
+- family set to Gamma(link='log') because of how spike rates are distributed
+- correlation structure set to ar1 or exchangeable
+```{r}
+# Get spike rate means for each song across time bins
+sr_formatted$asm_study_simple = factor(sr_formatted$asm_study_simple)
+sr_formatted$sex = factor(sr_formatted$sex)
+sr_formatted$event = factor(sr_formatted$event)
+sr_formatted$time_bin = factor(sr_formatted$time_bin)
+
+sr_summary <- sr_formatted %>% 
+  group_by(ID, age_study, sex, event, asm_study_simple) %>%
+  summarise(
+    rate_all_median = median(rate_all, na.rm = TRUE), 
+    rate_SOZ_median = median(rate_SOZ, na.rm = TRUE), 
+    rate_nSOZ_median = median(rate_nSOZ, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+sr_summary$event <- factor(sr_summary$event, levels = c("pre-exp baseline", "K448_MONO", "K448_106BPM", "K448_136BPM", "K448_166BPM", "WAGNER", "BACH", "COLDPLAY"))
+```
+
+```{r}
+plot_spike_rates <- function(df, rate_col, y_label = "IEDs/second", title = "") {
+  
+  # Compute counts for x-axis labels
+  n_counts <- df %>%
+    group_by(event) %>%
+    summarise(n = n()) %>%
+    mutate(label = paste0(gsub("_", " ", event), " (n=", n, ")"))
+  
+ggplot(df, aes_string(x = "event", y = rate_col, fill = "event")) + 
+    stat_boxplot(geom ='errorbar', width=0.5) +
+    geom_boxplot(alpha = 1, outlier.shape = NA) + 
+    geom_jitter(width = 0.05, size = 1, alpha = 0.7, color = "black") + 
+    labs(title = title, x = "", y = y_label, fill = "Event (n)") + 
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_blank(),          # Remove x-axis labels
+      axis.ticks.x = element_blank(),         # Remove x-axis ticks
+      axis.text.y = element_text(color = "black"),
+      axis.title = element_text(color = "black"),
+      plot.title = element_text(hjust = 0.5, color = "black"),
+      plot.subtitle = element_text(hjust = 0.5, color = "black"),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      plot.background = element_blank()
+    ) + 
+    scale_fill_brewer(palette = 'Dark2', labels = n_counts$label) +
+    scale_y_continuous(breaks = seq(0, max(df[[rate_col]], na.rm=TRUE), by = 0.05))
+}
+```
+
+```{r}
+# All contacts
+plot_spike_rates(sr_summary, "rate_all_median", y_label = "IEDs/second", title = "All contacts")
+# SOZ contacts
+plot_spike_rates(sr_summary, "rate_SOZ_median", y_label = "IEDs/second", title = "SOZ contacts")
+# nSOZ contacts
+plot_spike_rates(sr_summary, "rate_nSOZ_median", y_label = "IEDs/second", title = "nSOZ contacts")
+```
+
+
+```{r}
+# relevel variables
+sr_models <- sr_formatted
+sr_models$event = relevel(sr_models$event, ref = "pre-exp baseline")
+sr_models$asm_study_simple = relevel(sr_models$asm_study_simple, ref = "off")
+
+# rescale numerical vars
+minMax <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+sr_models$age_study = minMax(sr_models$age_study)
+sr_models$rate_all = minMax(sr_models$rate_all)
+
+quasi_poisson_model <- glm(
+  rate_all ~ event + age_study + sex + asm_study_simple, 
+  data = sr_models, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model)
+```
+
+```{r}
+sr_models_SOZ <- sr_models[!is.na(sr_models$rate_SOZ), ]
+any(is.na(sr_models_SOZ$rate_nSOZ))
+
+sr_models_SOZ$rate_SOZ = minMax(sr_models_SOZ$rate_SOZ)
+sr_models_SOZ$rate_nSOZ = minMax(sr_models_SOZ$rate_nSOZ)
+
+quasi_poisson_model_SOZ <- glm(
+  rate_SOZ ~ event + age_study + sex + asm_study_simple, 
+  data = sr_models_SOZ, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_SOZ)
+
+quasi_poisson_model_nSOZ <- glm(
+  rate_nSOZ ~ event + age_study + sex + asm_study_simple, 
+  data = sr_models_SOZ, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_nSOZ)
+```
+
+
+```{r}
+sr_models_filtered <- sr_models %>%
+  filter(time_bin %in% c("0-15s", "15-30s", "30-45s", "45-60s"))
+
+quasi_poisson_model <- glm(
+  rate_all ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sr_models_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model)
+
+
+sr_models_SOZ_filtered <- sr_models_SOZ %>%
+  filter(time_bin %in% c("0-15s", "15-30s", "30-45s", "45-60s"))
+
+quasi_poisson_model_SOZ <- glm(
+  rate_SOZ ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sr_models_SOZ_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_SOZ)
+
+quasi_poisson_model_nSOZ <- glm(
+  rate_nSOZ ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sr_models_SOZ_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_nSOZ)
+```
+
