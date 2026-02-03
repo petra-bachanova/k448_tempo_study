@@ -21,7 +21,8 @@ library(table1)
 
 ### Load data
 ```{r}
-project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
+# project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
+project_path = "/Volumes/ECoG/music_study_tempo"
 # get participant metadata
 participants_path <- file.path(project_path, "rawdata", "participants.tsv")
 participants <- read_tsv(participants_path)
@@ -180,7 +181,6 @@ plot_spike_rates(sr_summary, "rate_SOZ_median", y_label = "IEDs/second", title =
 plot_spike_rates(sr_summary, "rate_nSOZ_median", y_label = "IEDs/second", title = "nSOZ contacts")
 ```
 
-
 ```{r}
 # relevel variables
 sr_models <- sr_formatted
@@ -200,6 +200,13 @@ quasi_poisson_model <- glm(
   data = sr_models, 
   family = quasipoisson(link = "log"))
 summary(quasi_poisson_model)
+```
+
+```{r}
+counts <- as.data.frame(table(sr_merged$rate_all))
+
+
+
 ```
 
 ```{r}

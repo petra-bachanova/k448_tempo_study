@@ -4,6 +4,7 @@ rawdata/
 derivatives/
 _electrode_locations/
 stimuli/
+TODO.txt
 
 # Ignore system files
 .DS_Store
@@ -47,3 +48,4 @@ venv/
 mne_data/
 mne_cache/
 scratch/
+.Rproj.user

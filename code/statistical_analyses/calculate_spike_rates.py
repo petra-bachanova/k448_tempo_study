@@ -65,6 +65,7 @@ def compute_binned_spike_rates(spike_df, start_time, end_time, bin_len, max_dura
         dict[str, float]: Dictionary mapping time bins ('0-15s', '15-30s', etc.) to spike rates.
     """
     spike_rates = {}
+    spike_counts = {}
 
     total_duration = end_time - start_time
     if max_duration:
@@ -79,8 +80,9 @@ def compute_binned_spike_rates(spike_df, start_time, end_time, bin_len, max_dura
         rate = n_spikes / bin_len
 
         spike_rates[f"{int(i)}-{int(i + bin_len)}s"] = round(rate, 3)
+        spike_counts[f"{int(i)}-{int(i + bin_len)}s"] = n_spikes
 
-    return spike_rates
+    return spike_rates, spike_counts
 
 
 def bootstrap_spike_rates(spike_rates, n_iterations):
@@ -134,6 +136,7 @@ for _, row in meta.iterrows():
     tm = pd.read_csv(sub_time_marker_path)
 
     sr_merged = pd.DataFrame()
+    sc_merged = pd.DataFrame()
     events = ["pre-exp baseline", 'COLDPLAY', 'BACH', 'K448_MONO', 'K448_106BPM', 'K448_136BPM', 'K448_166BPM', 'WAGNER']
     for event in events:
         # Skip events the participant did not listen to
@@ -144,15 +147,16 @@ for _, row in meta.iterrows():
         event_start, event_end, duration = get_times_from_event(time_marker_df=tm, event=event)
         spikes_event = subset_event_spikes(spike_df=spikes, event_start=event_start, event_end=event_end)
 
-        # Calculate spike rates per events
+        # Calculate spike rates per events per contact type (i.e. all, SOZ, nSOZ)
         sr_event = pd.DataFrame()
+        sc_event = pd.DataFrame()
         for ct in contact_types:
             spikes_ct = spikes_event if ct == "all" else spikes_event[spikes_event[f"spike_in_{ct}"] == "yes"]
 
             bin_len = 15 if event == "pre-exp baseline" else 15
             max_dur = None if event == "pre-exp baseline" else 90
 
-            spike_rates = compute_binned_spike_rates(
+            spike_rates, spike_counts = compute_binned_spike_rates(
                 spike_df=spikes_ct, start_time=event_start, end_time=event_end, 
                 bin_len=bin_len, max_duration=max_dur)
 
@@ -160,14 +164,24 @@ for _, row in meta.iterrows():
                 plot_path = f"{sr_sub_path}/{sub}_{ses}_bootstrbase_hist_{ct}_contacts.png"
                 plot_bootstrapped_hist(spike_rates, plot_path)
 
-    
+
+            # format results for spike rates in an event's time bins (each column contains spike rates across all, SOZ and nSOZ contacts)    
             sr_ct = (pd.DataFrame.from_dict(spike_rates, orient="index", columns=[f"rate_{ct}"])
                         .reset_index().rename(columns={"index": "time_bin"}))
             sr_event = sr_ct if sr_event.empty else pd.merge(sr_event, sr_ct, on="time_bin", how="outer")
+
+            # same for spike counts
+            sc_ct = (pd.DataFrame.from_dict(spike_counts, orient="index", columns=[f"count_{ct}"])
+                        .reset_index().rename(columns={"index": "time_bin"}))
+            sc_event = sc_ct if sc_event.empty else pd.merge(sc_event, sc_ct, on="time_bin", how="outer")
 
         # Merge events
         sr_event["event"] = event
         sr_merged = pd.concat([sr_merged, sr_event], ignore_index=True)
 
+        sc_event["event"] = event
+        sc_merged = pd.concat([sc_merged, sc_event], ignore_index=True)
+
     # Save per participant/session
     sr_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_rates.csv", index=False)
+    sc_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_counts.csv", index=False)
