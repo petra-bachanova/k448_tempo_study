@@ -1,0 +1,294 @@
+---
+
+title: "gee_spike_rate_models"
+output: html_document
+date: "2025-11-03"
+---
+
+### Libraries
+```{r}
+library(ggplot2)
+library(readr)
+library(glue)
+library(dplyr)
+library(tidyr)
+library(geepack)
+library(car)
+library(geepack)
+library(purrr)
+library(table1)
+```
+
+### Load data
+```{r}
+# project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
+project_path = "/Volumes/ECoG/music_study_tempo"
+# get participant metadata
+participants_path <- file.path(project_path, "rawdata", "participants.tsv")
+participants <- read_tsv(participants_path)
+sessions <- read_tsv(file.path(project_path, "rawdata", "sessions.tsv")) %>% filter(exclude == 0)
+meta <- left_join(sessions, participants, by = "participant_id")
+meta$ID <- paste0(meta$participant_id, "_", meta$session)
+```
+
+```{r}
+# read in all participants' spike counts (=SC)
+sc_files <- meta %>%
+  mutate(sr_path = file.path(project_path,
+                             "derivatives",
+                             "calculated_spike_rates",
+                             participant_id,
+                             session,
+                             paste0(participant_id, "_", session, "_calculated_spike_counts.csv")))
+
+sc_merged <- sc_files %>%
+  mutate(data = map2(participant_id, session, ~ {
+    path <- file.path(project_path,
+                      "derivatives",
+                      "calculated_spike_rates",
+                      .x, .y,
+                      paste0(.x, "_", .y, "_calculated_spike_counts.csv"))
+    if (file.exists(path)) {
+      df <- read_csv(path)
+      df$ID <- paste(.x, .y, sep = "_")
+      return(df)
+    } else {
+      warning(paste("File not found:", path))
+      return(NULL)
+    }
+  })) %>%
+  pull(data) %>%
+  bind_rows()
+```
+
+```{r}
+# Plot line chart with baseline bins across participants -> identify non-spikers
+sc_bs <- sc_merged[sc_merged$event=="pre-exp baseline", ]
+sc_bs <- sc_bs %>%
+  mutate(time_bin = factor(time_bin, levels = unique(time_bin)))
+
+ggplot(sc_bs, aes(x = time_bin, y = count_all, color = ID, group = ID)) +
+  geom_line(size=1.3) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    x = "Time bin",
+    y = "Spike rate (all contacts)",
+    color = "Subject ID",
+    title = "Spike rates across time bins"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  ) + scale_color_brewer(palette = "Dark2")
+```
+
+
+### Boxplot
+```{r}
+ggplot(sc_bs, aes(x = reorder(ID, count_all, median), y = count_all)) +
+  geom_boxplot(fill = "#b6b5d8", alpha = 1, outlier.shape = 16, outlier.alpha = 0.6) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  ggtitle(label = "Participants' spike rate at baseline",
+          subtitle = "Red dashed line = 1 IED in 15s bin") +
+  ylab("IEDs in 15s") +
+  xlab("Participant ID") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, color = "black"),
+    plot.subtitle = element_text(hjust = 0.5, color = "black"),
+    axis.title = element_text(color = "black"),
+    axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+    axis.text.y = element_text(color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+```{r}
+sc_formatted <- sc_merged %>% 
+  filter(!(ID %in% c('sub-20_ses-01', 'sub-26_ses-01'))) %>%
+  group_by(ID) %>%
+  mutate(median_baseline = median(count_all[event == "pre-exp baseline"], na.rm = TRUE)) %>%
+  ungroup()
+
+sc_formatted <- left_join(sc_formatted, meta[, c("ID", "age_study", "sex", "asm_study_simple")], by = "ID")
+sc_formatted <- sc_formatted[, c("ID", "age_study", "sex", "asm_study_simple", "event", "time_bin", "median_baseline", "count_all", "count_SOZ", "count_nSOZ")]
+
+head(sc_formatted)
+```
+
+### Model 1: global spike rates ~ song + other covs
+- family set to Gamma(link='log') because of how spike rates are distributed
+- correlation structure set to ar1 or exchangeable
+```{r}
+# Get spike rate means for each song across time bins
+sc_formatted$asm_study_simple = factor(sc_formatted$asm_study_simple)
+sc_formatted$sex = factor(sc_formatted$sex)
+sc_formatted$event = factor(sc_formatted$event)
+sc_formatted$time_bin = factor(sc_formatted$time_bin)
+
+sc_summary <- sc_formatted %>% 
+  group_by(ID, age_study, sex, event, asm_study_simple) %>%
+  summarise(
+    count_all_median = median(count_all, na.rm = TRUE), 
+    count_SOZ_median = median(count_SOZ, na.rm = TRUE), 
+    count_nSOZ_median = median(count_nSOZ, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+sc_summary$event <- factor(sc_summary$event, levels = c("pre-exp baseline", "K448_MONO", "K448_106BPM", "K448_136BPM", "K448_166BPM", "WAGNER", "BACH", "COLDPLAY"))
+```
+
+```{r}
+plot_spike_counts <- function(df, rate_col, y_label = "IEDs in 15s", title = "") {
+  
+  # Compute counts for x-axis labels
+  n_counts <- df %>%
+    group_by(event) %>%
+    summarise(n = n()) %>%
+    mutate(label = paste0(gsub("_", " ", event), " (n=", n, ")"))
+  
+ggplot(df, aes_string(x = "event", y = rate_col, fill = "event")) + 
+    stat_boxplot(geom ='errorbar', width=0.5) +
+    geom_boxplot(alpha = 1, outlier.shape = NA) + 
+    geom_jitter(width = 0.05, size = 1, alpha = 0.7, color = "black") + 
+    labs(title = title, x = "", y = y_label, fill = "Event (n)") + 
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_blank(),          # Remove x-axis labels
+      axis.ticks.x = element_blank(),         # Remove x-axis ticks
+      axis.text.y = element_text(color = "black"),
+      axis.title = element_text(color = "black"),
+      plot.title = element_text(hjust = 0.5, color = "black"),
+      plot.subtitle = element_text(hjust = 0.5, color = "black"),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      plot.background = element_blank()
+    ) + 
+    scale_fill_brewer(palette = 'Dark2', labels = n_counts$label) 
+# +
+#     scale_y_continuous(breaks = seq(0, max(df[[rate_col]], na.rm=TRUE), by = 0.05))
+}
+```
+
+```{r}
+# All contacts
+plot_spike_counts(sc_summary, "count_all_median", y_label = "IEDs in 15s", title = "Mean spike count (per 15s) in stimuli (all contacts)")
+# SOZ contacts
+plot_spike_counts(sc_summary, "count_SOZ_median", y_label = "IEDs in 15s", title = "Mean spike count (per 15s) in stimuli (SOZ contacts)")
+# nSOZ contacts
+plot_spike_counts(sc_summary, "count_nSOZ_median", y_label = "IEDs in 15s", title = "Mean spike count (per 15s) in stimuli (nSOZ contacts)")
+```
+
+```{r}
+# relevel variables
+sc_models <- sc_formatted
+sc_models$event = relevel(sc_models$event, ref = "pre-exp baseline")
+sc_models$asm_study_simple = relevel(sc_models$asm_study_simple, ref = "off")
+
+quasi_poisson_model <- glm(
+  count_all ~ event + age_study + sex + asm_study_simple, 
+  data = sc_models, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model)
+
+quasi_poisson_model <- glm(
+  count_all ~ age_study + sex + asm_study_simple, 
+  data = sc_models, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model)
+```
+
+```{r}
+sc_models_SOZ <- sc_models[!is.na(sc_models$count_SOZ), ]
+any(is.na(sc_models_SOZ$count_nSOZ))
+
+quasi_poisson_model_SOZ <- glm(
+  count_SOZ ~ event + age_study + sex + asm_study_simple, 
+  data = sc_models_SOZ, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_SOZ)
+
+quasi_poisson_model_nSOZ <- glm(
+  count_nSOZ ~ event + age_study + sex + asm_study_simple, 
+  data = sc_models_SOZ, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_nSOZ)
+```
+```{r}
+theme_custom <- 
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_rect(fill = "transparent", color = NA),  # main panel
+      plot.background = element_rect(fill = "transparent", color = NA),   # entire plot
+      axis.line = element_line(color = "black", size=1),
+      axis.ticks = element_line(size = 1),
+      axis.text = element_text(size = 10, face="bold"),
+      axis.title = element_text(size = 10, face = "bold"),
+      plot.title = element_text(size = 12, face = "bold"),
+      legend.position = "top",
+      legend.title = element_blank(),
+      legend.text = element_text(size = 10, face = "bold")
+    )
+
+# mean counts per subjects
+mean_count_per_subject <- sc_models %>% group_by(ID) %>% summarise(mean_spike_count_per_ID = mean(count_all))
+mean_count_per_subject <- mean_count_per_subject %>% left_join(meta[c("ID", "sex", "asm_study_simple")])
+mean_count_per_subject$asm_study_simple <- factor(mean_count_per_subject$asm_study_simple, levels = c("full", "reduced", "off"))
+
+ggplot(data=mean_count_per_subject, aes(x=sex, y=mean_spike_count_per_ID, fill = sex)) +
+    geom_boxplot() + theme_custom
+
+ggplot(data=mean_count_per_subject, aes(x=asm_study_simple, y=mean_spike_count_per_ID, fill = asm_study_simple)) +
+    geom_boxplot() + theme_custom + facet_wrap(~ sex)
+```
+
+
+```{r}
+# TIME-SERIES MODELS (60s)
+sc_models_filtered <- sc_models %>%
+  filter(time_bin %in% c("0-15s", "15-30s", "30-45s", "45-60s"))
+
+quasi_poisson_model <- glm(
+  count_all ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sc_models_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model)
+
+
+sc_models_SOZ_filtered <- sc_models_SOZ %>%
+  filter(time_bin %in% c("0-15s", "15-30s", "30-45s", "45-60s"))
+
+quasi_poisson_model_SOZ <- glm(
+  count_SOZ ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sc_models_SOZ_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_SOZ)
+
+quasi_poisson_model_nSOZ <- glm(
+  count_nSOZ ~ event + time_bin + age_study + sex + asm_study_simple, 
+  data = sc_models_SOZ_filtered, 
+  family = quasipoisson(link = "log"))
+summary(quasi_poisson_model_nSOZ)
+```
+```{r}
+library(lme4)
+m0 <- glmer(count_all ~ 1 + (1|ID), family = poisson, data = sc_models_filtered)
+m1 <- glmer(count_all ~ event + age_study + sex + asm_study_simple + (1|ID), 
+            family = poisson, data = sc_models_filtered,
+            control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+
+
+library(performance)
+icc(m0)
+icc(m1)
+```
+
+
+
+
+
