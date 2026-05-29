@@ -49,3 +49,7 @@ mne_data/
 mne_cache/
 scratch/
 .Rproj.user
+
+# Ignore R files
+.Rhistory
+music_study_tempo.Rproj
