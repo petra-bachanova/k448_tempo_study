@@ -3,7 +3,7 @@ import os
 from extract_time_markers import *
 
 # Load metadata
-project_path = "/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
+project_path = "/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study"
 participants_path = f"{project_path}/rawdata/participants.tsv"
 participants = pd.read_csv(participants_path, sep="\t")
 sessions = pd.read_csv(f"{project_path}/rawdata/sessions.tsv", sep="\t")
