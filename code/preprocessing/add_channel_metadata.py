@@ -76,7 +76,7 @@ def process_channels(sub: str, ses: str, row: pd.Series, project_path: Path) -> 
     # channels.to_csv(f"{project_path}/test{sub}{ses}.tsv", sep="\t", index=False)
 
 
-project_path = Path("/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo")
+project_path = Path("/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study")
 # initialize PyBIDS layout & load participant, session metadata
 layout = BIDSLayout(project_path / "rawdata", validate=False)
 # TODO: rewrite paths to participants and session using layout

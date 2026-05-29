@@ -21,8 +21,8 @@ library(table1)
 
 ### Load data
 ```{r}
-# project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
-project_path = "/Volumes/ECoG/music_study_tempo"
+# project_path = "/Volumes/rc/lab/E/ECoG/k448_tempo_study"
+project_path = "/Volumes/ECoG/k448_tempo_study"
 # get participant metadata
 participants_path <- file.path(project_path, "rawdata", "participants.tsv")
 participants <- read_tsv(participants_path)

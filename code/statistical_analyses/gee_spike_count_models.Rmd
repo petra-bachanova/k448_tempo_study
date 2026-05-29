@@ -21,8 +21,8 @@ library(table1)
 
 ### Load data
 ```{r}
-# project_path = "/Volumes/rc/lab/E/ECoG/music_study_tempo"
-project_path = "/Volumes/ECoG/music_study_tempo"
+# project_path = "/Volumes/rc/lab/E/ECoG/k448_tempo_study"
+project_path = "/Volumes/ECoG/k448_tempo_study"
 # get participant metadata
 participants_path <- file.path(project_path, "rawdata", "participants.tsv")
 participants <- read_tsv(participants_path)
@@ -117,6 +117,9 @@ sc_formatted <- left_join(sc_formatted, meta[, c("ID", "age_study", "sex", "asm_
 sc_formatted <- sc_formatted[, c("ID", "age_study", "sex", "asm_study_simple", "event", "time_bin", "median_baseline", "count_all", "count_SOZ", "count_nSOZ")]
 
 head(sc_formatted)
+# cols <- c("ID", "age_study", "sex", "asm_study_simple", "event", "time_bin", "median_baseline", "count_all")
+# export <- sc_formatted[cols]
+# write.csv(export, '/Users/petra/Documents/learning/Dartmouth/classes/YEAR 3/QBS121/Week 5 - Hierarchical and longitudinal data (GEE)/sweave/music_data_for_poisson.csv')
 ```
 
 ### Model 1: global spike rates ~ song + other covs

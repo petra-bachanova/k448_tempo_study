@@ -12,8 +12,8 @@ subjects = [
 ]
 
 # Paths
-raw_backup_root = Path("/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo/rawdata_original_Natus")
-raw_root = Path("/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo/rawdata")  # new BIDS path
+raw_backup_root = Path("/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study/rawdata_original_Natus")
+raw_root = Path("/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study/rawdata")  # new BIDS path
 
 # Define patterns for non-iEEG channels
 not_ieeg_patterns = ['DC', 'TRIG', 'OSAT', 'PR', 'Pleth', 'FP', 'Fp', 'F', 'C', 'P', 'O', 'T', 'EKG']

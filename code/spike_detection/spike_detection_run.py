@@ -11,7 +11,7 @@ import os
 sub = os.getenv("SUBJECT")
 ses = os.getenv("SESSION")  # use a leading 0 i.e. "01" instead of "1"
 
-project_path = "/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
+project_path = "/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study"
 derivatives_path = f"{project_path}/derivatives"
 spikedetection_sub_dir = f"{derivatives_path}/spike_detection/{sub}/{ses}"
 os.makedirs(spikedetection_sub_dir, exist_ok=True)

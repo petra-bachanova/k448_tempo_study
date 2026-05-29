@@ -1,6 +1,6 @@
-# Music3
+# K448 tempo study
 
-This repository contains code for Music3, a study investigating the relationship between musical characteristics (e.g. tempo) and interictal epileptiform discharges (IEDs).
+This repository contains code for K448 tempo study, a study investigating the relationship between musical characteristics of Mozart's K448 sonata and interictal epileptiform discharges (IEDs).
 
 Only code is tracked. The full repository structure is as follows:
 

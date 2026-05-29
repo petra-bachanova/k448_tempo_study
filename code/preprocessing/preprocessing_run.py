@@ -9,7 +9,7 @@ import os
 sub = os.getenv("SUBJECT")
 ses = os.getenv("SESSION")  # use a leading 0 i.e. "01" instead of "1"
 
-project_path = "/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
+project_path = "/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study"
 bids_sub_dir = f"{project_path}/rawdata/{sub}/{ses}/ieeg"
 deriv_sub_dir = f"{project_path}/derivatives/preprocessing/{sub}/{ses}"
 os.makedirs(deriv_sub_dir, exist_ok=True)

@@ -1,8 +1,8 @@
 #!/bin/bash
 # --------------------------------------------------------------------------------------------------------
 #SBATCH -J spike_detection                                                  # Job name
-#SBATCH -o /dartfs-hpc/rc/lab/E/ECoG/music_study_tempo/temp_out_%j.txt      # Name of stdout output file
-#SBATCH -e /dartfs-hpc/rc/lab/E/ECoG/music_study_tempo/temp_err_%j.txt      # Name of stderr output file
+#SBATCH -o /dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study/temp_out_%j.txt      # Name of stdout output file
+#SBATCH -e /dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study/temp_err_%j.txt      # Name of stderr output file
 #SBATCH -N 1                                                                # Total # of nodes
 #SBATCH -n 1                                                                # Total # of mpi tasks
 #SBATCH -c 8                                                                # Allocate # of CPUs per task
@@ -16,7 +16,7 @@ export SUBJECT="sub-32"
 export SESSION="ses-01"
 export FULLID="${SUBJECT}_${SESSION}"
 
-PROJECT_PATH="/dartfs-hpc/rc/lab/E/ECoG/music_study_tempo"
+PROJECT_PATH="/dartfs-hpc/rc/lab/E/ECoG/k448_tempo_study"
 LAUNCHER_OUTPUT_DIR="${PROJECT_PATH}/derivatives/spike_detection/launcher_output"
 
 mv ${PROJECT_PATH}/temp_out_${SLURM_JOB_ID}.txt ${LAUNCHER_OUTPUT_DIR}/${FULLID}_spike_detection_${SLURM_JOB_ID}_out.txt
