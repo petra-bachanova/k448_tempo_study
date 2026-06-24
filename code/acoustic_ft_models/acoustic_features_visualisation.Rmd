@@ -1,0 +1,134 @@
+---
+title: "acoustic_features_visualisation"
+output: html_document
+---
+
+```{r}
+library(glue)
+library(ggplot2)
+library(patchwork)
+
+project_path = "/Volumes/rc/lab/E/ECoG/k448_tempo_study"
+stimuli = c("BACH", "COLDPLAY", "K448_MONO", "K448_106BPM", "K448_136BPM", "K448_166BPM")
+
+for (stim in stimuli) {
+  
+  df <- read.csv(glue("{project_path}/derivatives/acoustic_ft_analysis/{stim}.csv"))
+  
+  p1 <- ggplot(df, aes(x = X, y = RMS_1s_bins)) +
+    geom_line(colour = "#378ADD") +
+    labs(x = NULL, y = "RMS") +
+    theme_minimal()
+  
+  p2 <- ggplot(df, aes(x = X, y = Centroid_1s_bins)) +
+    geom_line(colour = "#1D9E75") +
+    labs(x = NULL, y = "Centroid (Hz)") +
+    theme_minimal()
+  
+  p3 <- ggplot(df, aes(x = X, y = Flux_1s_bins)) +
+    geom_line(colour = "#D85A30") +
+    labs(x = "Time (s)", y = "Flux") +
+    theme_minimal()
+  
+  combined <- p1 / p2 / p3 +
+    plot_annotation(title = stim)
+  
+  # ggsave(
+  #   glue("{project_dir}/derivatives/acoustic_ft_analysis/plots/{stim}_features.png"),
+  #   combined,
+  #   width = 10, height = 7
+  # )
+
+  print(combined)
+  }
+```
+
+
+### Libraries
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(geepack)
+library(car)
+library(geepack)
+library(purrr)
+library(table1)
+```
+
+### Load data
+```{r}
+# get participant metadata
+participants_path <- file.path(project_path, "rawdata", "participants.tsv")
+participants <- read_tsv(participants_path)
+sessions <- read_tsv(file.path(project_path, "rawdata", "sessions.tsv")) %>% filter(exclude == 0)
+meta <- left_join(sessions, participants, by = "participant_id")
+meta$ID <- paste0(meta$participant_id, "_", meta$session)
+```
+
+```{r}
+# read in all participants' spike counts (=SC)
+sc_files <- meta %>%
+  mutate(sr_path = file.path(project_path,
+                             "derivatives",
+                             "calculated_spike_rates",
+                             participant_id,
+                             session,
+                             paste0(participant_id, "_", session, "_calculated_spike_counts_1sec.csv")))
+
+sc_merged <- sc_files %>%
+  mutate(data = map2(participant_id, session, ~ {
+    path <- file.path(project_path,
+                      "derivatives",
+                      "calculated_spike_rates",
+                      .x, .y,
+                      paste0(.x, "_", .y, "_calculated_spike_counts_1sec.csv"))
+    if (file.exists(path)) {
+      df <- read_csv(path)
+      df$ID <- paste(.x, .y, sep = "_")
+      return(df)
+    } else {
+      warning(paste("File not found:", path))
+      return(NULL)
+    }
+  })) %>%
+  pull(data) %>%
+  bind_rows()
+```
+
+```{r}
+sc_merged
+```
+
+
+
+```{r}
+library(tidyverse)
+
+stimuli <- c("K448_106BPM", "K448_136BPM", "K448_166BPM")
+
+plots <- map(stimuli, function(stim) {
+  
+  df <- read.csv(glue("{project_path}/derivatives/acoustic_ft_analysis/{stim}.csv"))
+  
+  spikes <- sc_merged %>%
+    filter(event == stim) %>%
+    mutate(time_s = as.integer(str_extract(time_bin, "^[0-9]+"))) %>%
+    group_by(time_s) %>%
+    summarise(count_all = sum(count_all), .groups = "drop")
+  
+  ggplot(df, aes(x = X, y = Flux_1s_bins)) +
+    geom_line(colour = "#D85A30") +
+    geom_segment(
+      data = spikes %>% filter(count_all > 0),
+      aes(x = time_s, xend = time_s, y = 0, yend = count_all),
+      colour = "#3EB489", alpha = 0.7, linewidth = 0.5
+    ) +
+    labs(x = "Time (s)", y = "Flux", title = stim) +
+    theme_minimal()
+})
+
+wrap_plots(plots, ncol = 1)
+
+```
+
