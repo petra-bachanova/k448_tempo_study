@@ -529,7 +529,7 @@ def detect_with_cnn(project_dir, subject_and_session):
     return df
 
 
-def clean_and_format_spike_data(df, subject_and_session, channels, samp_freq, win = 3): 
+def clean_and_format_spike_data(df, subject_and_session, channels, samp_freq, win = 3, deduplicate=True): 
     """
     Cleans and formats the CNN spike output. This function processes the spike detection data, removes overlapping spikes within a specified time window,
     and formats the data for export. It identifies unique spike events, counts the number of channels involved,
@@ -561,14 +561,21 @@ def clean_and_format_spike_data(df, subject_and_session, channels, samp_freq, wi
     df['start'] = df['start'].astype(int) # convert from str to int
     ### sort start times in df:
     df = df.sort_values(by = 'start', ascending = True)
-    ### dedupe spikes by col and time
-    bins =  np.arange(min(df.start.values), max(df.start.values), samp_freq*win)
-    spikebins = np.digitize(df['start'], bins)
-    cleandf = df.groupby(spikebins)['start'].describe()
-    chanlist = df.groupby(spikebins)['chan'].apply(lambda x: x.values.tolist())
-    chanlist = [list(set(x)) for x in chanlist]
-    chancounts = [len(l) for l in chanlist]
-    meanspikestart = (cleandf['mean']).astype(int)
+        ### dedupe spikes by col and time
+    if deduplicate:
+        bins = np.arange(min(df.start.values), max(df.start.values), samp_freq * win)
+        spikebins = np.digitize(df['start'], bins)
+        cleandf = df.groupby(spikebins)['start'].describe()
+        chanlist = df.groupby(spikebins)['chan'].apply(lambda x: x.values.tolist())
+        chanlist = [list(set(x)) for x in chanlist]
+        chancounts = [len(l) for l in chanlist]
+        meanspikestart = (cleandf['mean']).astype(int)
+    else:
+        grouped = df.groupby('start')
+        meanspikestart = grouped['start'].first()
+        chanlist = grouped['chan'].apply(lambda x: list(set(x.tolist())))
+        chancounts = chanlist.apply(len)
+
     subjectid = [subject_and_session]*len(meanspikestart)
     ### reformat into new df
     finaldf = pd.DataFrame({'subject': subjectid, 'spike_start': meanspikestart, 
@@ -598,7 +605,8 @@ def clean_and_format_spike_data(df, subject_and_session, channels, samp_freq, wi
     top10chs = pd.DataFrame({'channel_name': Counter(channel_counts).keys(), 'count':Counter(channel_counts).values()})
     top10chs = top10chs.sort_values(by='count', ascending=False).iloc[:10, :]
     top10chs = top10chs.set_index('channel_name')['count'].to_dict()
-    logging.info(f"Top 10 channels: {top10chs}")
+    dedup_label = "deduplicated" if deduplicate else "all"
+    logging.info(f"Top 10 channels ({dedup_label} spikes): {top10chs}")
 
     return (finaldf)
 

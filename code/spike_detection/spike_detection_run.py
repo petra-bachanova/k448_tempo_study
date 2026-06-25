@@ -27,7 +27,7 @@ os.makedirs(spectrogram_path, exist_ok=True)
 
 # LOAD EEG & INITIALISE LOGGING
 # --------------------------
-start_time = time.time()
+start_time = time()
 log_path = f"{spikedetection_sub_dir}/{sub}_{ses}_spike_detection_log.log"
 configure_logfile(path=log_path)
 
@@ -44,18 +44,21 @@ template_m_spikes = auto_detect(eegdata=processed_eeg, saveplotpath=template_mat
 spectimgs(eegdata=processed_eeg, spikedf=template_m_spikes, spectdir=spectrogram_path)
 # Apply pretrained CNN to classify spikes
 cnn_spikes = detect_with_cnn(project_dir=project_path, subject_and_session=f"{sub}_{ses}")
-cnn_spikes.to_excel(f'{spikedetection_sub_dir}/{f"{sub}_{ses}"}_spike_detection_BEFORE_DEDUPE.xlsx', index=False)
+cnn_spikes_clean = clean_and_format_spike_data(
+    df=cnn_spikes, subject_and_session=f"{sub}_{ses}", channels=channels, samp_freq=template_m_spikes.fs.values[0], deduplicate=False)
+cnn_spikes_clean.to_excel(f'{spikedetection_sub_dir}/{f"{sub}_{ses}"}_spike_detection_all_spikes.xlsx', index=False)
+logging.info(f"Final number of spikes detected (before deduplication): {len(cnn_spikes_clean)}")
 
 # Clean and format the spike output
-cnn_spikes_clean = clean_and_format_spike_data(
-    df=cnn_spikes, subject_and_session=f"{sub}_{ses}", channels=channels, samp_freq=template_m_spikes.fs.values[0])
-cnn_spikes_clean.to_excel(f'{spikedetection_sub_dir}/{sub}_{ses}_spike_detection.xlsx', index=False)
-logging.info(f"Final number of spikes detected: {len(cnn_spikes_clean)}")
+cnn_spikes_clean_and_dedupe = clean_and_format_spike_data(
+    df=cnn_spikes, subject_and_session=f"{sub}_{ses}", channels=channels, samp_freq=template_m_spikes.fs.values[0], deduplicate=True)
+cnn_spikes_clean_and_dedupe.to_excel(f'{spikedetection_sub_dir}/{sub}_{ses}_spike_detection_dedupe_spikes.xlsx', index=False)
+logging.info(f"Final number of spikes detected (after deduplication): {len(cnn_spikes_clean_and_dedupe)}")
 
 # Clear subject's IED images from the spectrogram directory
 clear_spectrogram_dir(path=spectrogram_path, subject_and_session=f"{sub}_{ses}")
 
 # Save the log file
-print(f"Runtime duration: {time.time() - start_time:.2f} s (={(time.time() - start_time)/60:.2f} min)")
+print(f"Runtime duration: {time() - start_time:.2f} s (={(time() - start_time)/60:.2f} min)")
 log_runtime_info(start_time=start_time, end_time=time.time())
 # --------------------------
