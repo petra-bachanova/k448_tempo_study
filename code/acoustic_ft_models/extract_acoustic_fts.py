@@ -22,7 +22,7 @@ music = ""
 music_dic = {
     "COLDPLAY": "Coldplay_Clocks_132bpm.wav",
     "BACH": "JSBach_PreludeNo2_Cminor_137bpm.wav",
-    # "WAGNER": "",
+    "WAGNER": "Wagner_LohengrinWWV75-PreludeToActI.wav",
     "K448_MONO": "K448-136bpm-Monotonic.wav",
     "K448_106BPM": "K448-Audio-106bpm.wav",
     "K448_136BPM": "K448-Audio-136bpm.wav",
@@ -41,6 +41,12 @@ for key, path in music_dic.items():
     # Spectral centroid ("brightness" / dominant frequency center)
     centroid = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=n_fft, hop_length=hop_length)[0]
     centroid_1s = average_over_1s(acoustic_ft=centroid, frames_per_sec=frames_per_sec)
+
+    # Replace first and last 1s bin with local median of neighbouring bins
+    centroid_1s[0] = np.median(centroid_1s[1:5])
+    centroid_1s[1] = np.median(centroid_1s[1:5])
+    centroid_1s[-1] = np.median(centroid_1s[-5:-1])
+
 
     # Spectral flux — frame-to-frame spectral change (onset proxy)
     # Computed manually as L2 norm of difference between consecutive magnitude spectra

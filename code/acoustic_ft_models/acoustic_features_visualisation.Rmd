@@ -8,7 +8,8 @@ library(glue)
 library(ggplot2)
 library(patchwork)
 
-project_path = "/Volumes/rc/lab/E/ECoG/k448_tempo_study"
+# project_path = "/Volumes/rc/lab/E/ECoG/k448_tempo_study"
+project_path = "/Volumes/ECoG/k448_tempo_study"
 stimuli = c("BACH", "COLDPLAY", "K448_MONO", "K448_106BPM", "K448_136BPM", "K448_166BPM")
 
 for (stim in stimuli) {
