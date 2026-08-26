@@ -1,6 +1,8 @@
+import os
 import librosa
 import numpy as np
 import pandas as pd
+import soundfile as sf
 
 
 def average_over_1s(acoustic_ft, frames_per_sec):
@@ -17,7 +19,8 @@ hop_length = 512
 sr = 22050
 n_fft = 2048
 frames_per_sec = sr / hop_length
-music = ""
+
+modspec_path = f"{project_path}/derivatives/acoustic_ft_analysis/modspec"
 
 music_dic = {
     "COLDPLAY": "Coldplay_Clocks_132bpm.wav",
@@ -31,6 +34,7 @@ music_dic = {
 
 for key, path in music_dic.items():
     wav_path = f"{project_path}/stimuli/wav files/{path}"
+    stem = os.path.splitext(path)[0]  # strip ".wav" to match modspec filenames
 
     y, _ = librosa.load(wav_path, sr=sr, mono=True)
 
@@ -47,13 +51,38 @@ for key, path in music_dic.items():
     centroid_1s[1] = np.median(centroid_1s[1:5])
     centroid_1s[-1] = np.median(centroid_1s[-5:-1])
 
-
     # Spectral flux — frame-to-frame spectral change (onset proxy)
-    # Computed manually as L2 norm of difference between consecutive magnitude spectra
     S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
     flux = np.sqrt(np.sum(np.diff(S, axis=1) ** 2, axis=0))
-    flux = np.concatenate([[0], flux])  # pad first frame with 0
+    flux = np.concatenate([[0], flux])
     flux_1s = average_over_1s(acoustic_ft=flux, frames_per_sec=frames_per_sec)
 
-    output_df = pd.DataFrame({"RMS_1s_bins": rms_1s, "Centroid_1s_bins": centroid_1s, "Flux_1s_bins": flux_1s})
-    output_df.to_csv(f"{project_path}/derivatives/acoustic_ft_analysis/{key}.csv")
+    acoustic_df = pd.DataFrame({
+        "RMS_1s_bins": rms_1s,
+        "Centroid_1s_bins": centroid_1s,
+        "Flux_1s_bins": flux_1s,
+    })
+
+    # --- modulation spectrum, extracted separately (Matlab) by Michal Casey, loaded here ---
+    modspec = np.loadtxt(f"{modspec_path}/{stem}_0_modspec.txt")
+    modfreqs = np.loadtxt(f"{modspec_path}/{stem}_0_modfreqs.txt")
+
+    modspec_cols = [f"modband_{round(f, 1)}" for f in modfreqs]
+    modspec_df = pd.DataFrame(modspec, columns=modspec_cols)
+
+    # compare lenghts between the wav file, acoustic df and modulation 
+    # spectrum features to make sure they align
+    info = sf.info(f"{wav_path}")
+    duration_sec = info.frames / info.samplerate
+    print(f"{key}: modspec={modspec.shape}, acoustic_fts={acoustic_df.shape}, wav_duration={duration_sec}")
+
+    # modspec always ends up 1 row short (see modspec_1s_dB.m frame-count
+    # off-by-one).Truncate acoustic_df to match, dropping its LAST row so
+    # both dataframes stay aligned to the same real seconds of audio
+
+    n_rows = min(acoustic_df.shape[0], modspec_df.shape[0])
+    acoustic_df = acoustic_df.iloc[:n_rows].reset_index(drop=True)
+    modspec_df = modspec_df.iloc[:n_rows].reset_index(drop=True)
+
+    output_df = pd.concat([acoustic_df, modspec_df], axis=1)
+    output_df.to_csv(f"{project_path}/derivatives/acoustic_ft_analysis/{key}.csv", index=False)
