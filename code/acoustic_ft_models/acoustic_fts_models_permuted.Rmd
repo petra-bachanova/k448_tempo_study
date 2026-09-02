@@ -1,0 +1,419 @@
+---
+title: "acoustic_fts_models"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(glmmTMB)
+
+project_path <- "/Volumes/ECoG/k448_tempo_study"
+fs <- 200  # Hz, used only for spike samples -> seconds
+
+participants <- read_tsv(file.path(project_path, "rawdata", "participants.tsv"))
+sessions <- read_tsv(file.path(project_path, "rawdata", "sessions.tsv")) %>% filter(exclude == 0)
+meta <- left_join(sessions, participants, by = "participant_id")
+meta$ID <- paste0(meta$participant_id, "_", meta$session)
+```
+
+# load spikes function
+```{r}
+load_spikes <- function(participant_id, session) {
+  path <- file.path(project_path, "derivatives", "spike_detection",
+                     participant_id, session,
+                     paste0(participant_id, "_", session, "_spike_detection_all_spikes.xlsx"))
+  spikes <- readxl::read_excel(path)
+  spikes$spike_time_s <- spikes$spike_start / fs
+  spikes
+}
+```
+
+# load time markers function
+```{r}
+load_time_markers <- function(participant_id, session) {
+  path <- file.path(project_path, "derivatives", "time_markers",
+                     participant_id, session,
+                     paste0(participant_id, "_", session, "_processed_time_markers.csv"))
+  read_csv(path, show_col_types = FALSE)
+}
+```
+
+# bin spikes into 1 second time bins
+```{r}
+bin_spikes_for_event <- function(spikes, event_row) {
+  start_s <- floor(event_row$start_time)
+  end_s   <- floor(event_row$end_time)
+  bins <- tibble(second_in_stim = 0:(end_s - start_s - 1))
+  bins$spike_count <- sapply(bins$second_in_stim, function(s) {
+    b0 <- start_s + s
+    sum(spikes$spike_time_s >= b0 & spikes$spike_time_s < b0 + 1)
+  })
+  bins
+}
+```
+
+# load acoustic features and create offsets
+```{r}
+load_acoustic <- function(stimulus_name) {
+  path <- file.path(project_path, "derivatives", "acoustic_ft_analysis",
+                     paste0(stimulus_name, ".csv"))
+  af <- read_csv(path, show_col_types = FALSE)
+  af$second_in_stim <- 0:(nrow(af)-1)
+  af
+}
+```
+
+# Create full dataframe with participant spikes and acoustic features
+```{r}
+all_data <- list()
+
+for (id in meta$ID) {
+  participant_id <- meta$participant_id[meta$ID == id]
+  session        <- meta$session[meta$ID == id]
+
+  sp <- load_spikes(participant_id, session)
+  tm <- load_time_markers(participant_id, session)
+
+  stim_events <- tm %>%
+  filter(!str_detect(event, "baseline|GAP|TALKING|SART")) %>%
+  filter(!str_detect(event, regex("COLDPLAY|K448_MONO", ignore_case = TRUE)))
+
+  for (i in seq_len(nrow(stim_events))) {
+    event_row <- stim_events[i, ]
+    stim_name <- event_row$event
+
+    bins <- bin_spikes_for_event(sp, event_row)
+    acoustic_fts <- load_acoustic(stim_name)
+    merged <- left_join(bins, acoustic_fts, by = "second_in_stim") %>%
+      filter(!is.na(RMS_1s_bins))   
+    # filter drops trailing rows with no acoustic data - last two rows of acoustic features are NA 
+    # 1) because they are only extracted from full seconds i.e. last partial second is not
+    # and 2) modulation spectrum has a 2s windowing that prevents the penultimate full second to be analysed
+    merged$ID <- id
+    merged$piece <- stim_name
+    all_data[[paste(id, stim_name)]] <- merged
+  }
+}
+
+full_df <- bind_rows(all_data)
+full_df %>% count(piece)
+full_df %>% count(ID)
+```
+
+# Centre within piece and scale by each acoustic feature's own pooled SD
+```{r}
+full_df <- full_df %>%
+  group_by(piece) %>%
+  mutate(across(matches("_1s_bins$|^modband_"), ~ . - mean(., na.rm = TRUE), .names = "{.col}_c")) %>%
+  ungroup() %>%
+  mutate(across(matches("_1s_bins_c$|^modband_.*_c$"), ~ . / sd(., na.rm = TRUE), .names = "{.col}_z"))
+
+full_df %>%
+  count(near_floor = modband_38.5 < -35) %>%
+  mutate(pct = n / sum(n) * 100)
+
+hist(full_df$modband_38.5, breaks = 50)
+```
+
+# Continuous model (negative binomial)
+```{r}
+m_cont <- glmmTMB(
+  spike_count ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+    modband_2.8_c_z + modband_38.5_c_z + 
+    piece + 
+    (1 | ID),
+  data = full_df,
+  family = nbinom2()
+)
+summary(m_cont)
+```
+
+# Convert spike counts to binary spike present yes/no
+```{r}
+full_df <- full_df %>%
+  mutate(spike_present = as.integer(spike_count > 0))
+
+# Check counts of 1s bins with n spikes (most bins have 0 spikes, 1/5 of bins have 1 spike etc.)
+spike_freqs <- full_df %>% count(spike_count)
+ggplot(data=spike_freqs, aes(x=spike_count, y=n)) + geom_col() + ggtitle("Frequency of specific spike counts in 1-second bins")
+```
+
+# Binary model
+```{r}
+m_binary <- glmmTMB(
+  spike_present ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+    modband_2.8_c_z + modband_38.5_c_z + 
+    piece + (1 | ID),
+  data = full_df,
+  family = binomial()
+)
+summary(m_binary)
+```
+
+```{r}
+library(broom.mixed)
+
+tidy_binary <- tidy(m_binary, effects = "fixed", conf.int = TRUE) %>%
+  mutate(model = "Binary (spike present)")
+
+tidy_cont <- tidy(m_cont, effects = "fixed", conf.int = TRUE) %>%
+  mutate(model = "Count (NB)")
+
+coefs <- bind_rows(tidy_binary, tidy_cont) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    or_irr = exp(estimate),
+    conf.low = exp(conf.low),
+    conf.high = exp(conf.high),
+    term_clean = term %>%
+      str_remove("_1s_bins") %>%
+      str_remove("_c_z$"), 
+    significant = conf.low > 1 | conf.high < 1
+  )
+
+ordered_terms <- c(
+  "pieceWAGNER",
+  "pieceK448_166BPM",
+  "pieceK448_136BPM",
+  "pieceK448_106BPM",
+  "RMS",
+  "Centroid",
+  "Flux",
+  "modband_2.8",
+  "modband_38.5"
+)
+
+coefs <- coefs %>%
+  mutate(term_clean = factor(term_clean, levels = ordered_terms))
+
+ggplot(coefs, aes(x = or_irr, y = term_clean, color = significant, shape = model)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high),
+                   position = position_dodge(width = 0.4)) +
+  scale_color_manual(values = c(`TRUE` = "#D10056", `FALSE` = "grey70"),
+                      guide = "none") +
+  scale_shape_manual(values = c(16, 17)) +
+  scale_x_log10(breaks = c(0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3)) +
+  labs(x = "Odds Ratio / Incidence Rate Ratio (log scale)", y = NULL, shape = "Model",
+       title = "Effect of acoustic features and piece on IED likelihood/count") +
+  theme_minimal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+```
+
+```{r}
+m_piece_bin <- glmmTMB(
+  spike_present ~ piece + (1 | ID),
+  data = full_df,
+  family = binomial()
+)
+summary(m_piece_bin)
+
+
+m_piece_cont <- glmmTMB(
+  spike_count ~ piece + (1 | ID),
+  data = full_df,
+  family = nbinom2()
+)
+summary(m_piece_cont)
+```
+
+
+
+
+
+# Permutation model: testing effect of acoustic features on spikes
+## Permutation model functions
+```{r}
+circular_shift <- function(x, shift) {
+  # Rotates a vector by `shift` positions (values wrap from the end to the start)
+  # This is to break the temporal alignment between an acoustic feature and spikes 
+  # while preserving the feature's own values and internal autocorrelation.
+  n <- length(x)
+  shift <- shift %% n
+  if (shift == 0) return(x)
+  c(tail(x, n - shift), head(x, shift))
+}
+
+permute_once <- function(df) {
+  # applies circular_shift to each feature column independently within every (participant, piece) group, 
+  # using a different random shift per group. Produces one full permuted dataset where 
+  # every piece's music-to-spike alignment has been scrambled, but each piece's own acoustic dynamics 
+  # and each participant's own spike series are untouched.
+  group_keys <- unique(df[c("ID", "piece")])
+  pieces_shifted <- vector("list", nrow(group_keys))
+
+  for (i in seq_len(nrow(group_keys))) {
+    this_id <- group_keys$ID[i]
+    this_piece <- group_keys$piece[i]
+
+    sub_df <- df[df$ID == this_id & df$piece == this_piece, ]
+    n <- nrow(sub_df)
+
+    if (n < 10) {
+      pieces_shifted[[i]] <- sub_df
+      next
+    }
+
+    shift_amt <- sample(5:(n - 5), 1)
+    for (term in feature_terms) {
+      sub_df[[term]] <- circular_shift(sub_df[[term]], shift_amt)
+    }
+
+    pieces_shifted[[i]] <- sub_df
+  }
+
+  bind_rows(pieces_shifted)
+}
+
+get_zstats_both <- function(df) {
+  # fits the binary (spike present/absent, logistic) and count (spike count, negative binomial) models
+  # on the given dataset and returns the z-statistics for all feature terms from both models.
+  m_binary <- glmmTMB(
+    spike_present ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+      modband_2.8_c_z + modband_38.5_c_z + piece + (1 | ID),
+    data = df, family = binomial()
+  )
+  m_count <- glmmTMB(
+    spike_count ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+      modband_2.8_c_z + modband_38.5_c_z + piece + (1 | ID),
+    data = df, family = nbinom2()
+  )
+  z_binary <- summary(m_binary)$coefficients$cond[feature_terms, "z value"]
+  z_count  <- summary(m_count)$coefficients$cond[feature_terms, "z value"]
+  names(z_binary) <- paste0("binary_", feature_terms)
+  names(z_count)  <- paste0("count_", feature_terms)
+  c(z_binary, z_count)
+}
+
+# returns the largest absolute z-statistic from a vector of z-statistics. 
+# Applied to both the observed data and each permuted dataset to build the max-stat null distribution 
+# used for multiple-comparisons correction.
+max_stat <- function(z) max(abs(z), na.rm = TRUE)
+```
+
+## Testing a single permutation 
+```{r}
+feature_cols <- c("RMS_1s_bins", "Centroid_1s_bins", "Flux_1s_bins", "modband_2.8", "modband_38.5")
+feature_terms <- paste0(feature_cols, "_c_z")
+
+test_shift <- permute_once(full_df)
+# should be very close to 0 and the means should be identical when sorted
+mean(full_df$RMS_1s_bins_c_z, na.rm = TRUE); mean(test_shift$RMS_1s_bins_c_z, na.rm = TRUE)
+# the two correlations should now be different
+cor(full_df$RMS_1s_bins_c_z, full_df$spike_count, use = "complete.obs")
+cor(test_shift$RMS_1s_bins_c_z, test_shift$spike_count, use = "complete.obs")
+```
+
+## Final permutation model
+```{r}
+n_perm <- 100
+null_max <- numeric(n_perm)
+
+set.seed(42)
+for (p in seq_len(n_perm)) {
+  shifted <- permute_once(full_df)
+  z <- tryCatch(get_zstats_both(shifted), error = function(e) NA)
+  null_max[p] <- if (all(!is.na(z))) max_stat(z) else NA
+  if (p %% 10 == 0) message("permutation ", p, " done")
+}
+
+sum(is.na(null_max))  # check how many failed
+```
+
+## Actual model with observed z-scores
+```{r}
+observed_z <- get_zstats_both(full_df)
+observed_max <- max_stat(observed_z)
+```
+
+## Check p values against the permuted model
+```{r}
+term_pvals <- sapply(abs(observed_z), function(oz) mean(null_max >= oz, na.rm = TRUE))
+
+results <- tibble(
+  term = names(observed_z),
+  observed_z = observed_z,
+  p_permutation = term_pvals
+) %>% arrange(p_permutation)
+
+results
+```
+
+
+# Permutation model: testing interactions between modspec 38.5 Hz and piece on spikes
+```{r}
+get_zstats_interaction <- function(df) {
+  m_binary <- glmmTMB(
+    spike_present ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+      modband_2.8_c_z + modband_38.5_c_z * piece + (1 | ID),
+    data = df, family = binomial()
+  )
+  m_count <- glmmTMB(
+    spike_count ~ RMS_1s_bins_c_z + Centroid_1s_bins_c_z + Flux_1s_bins_c_z +
+      modband_2.8_c_z + modband_38.5_c_z * piece + (1 | ID),
+    data = df, family = nbinom2()
+  )
+
+  interaction_terms <- grep("modband_38.5_c_z:piece",
+                             rownames(summary(m_binary)$coefficients$cond),
+                             value = TRUE)
+
+  z_binary <- summary(m_binary)$coefficients$cond[interaction_terms, "z value"]
+  z_count  <- summary(m_count)$coefficients$cond[interaction_terms, "z value"]
+  names(z_binary) <- paste0("binary_", interaction_terms)
+  names(z_count)  <- paste0("count_", interaction_terms)
+  c(z_binary, z_count)
+}
+```
+
+## Permuted model
+```{r}
+n_perm <- 100
+null_max_interaction <- numeric(n_perm)
+
+set.seed(43)
+for (p in seq_len(n_perm)) {
+  shifted <- permute_once(full_df)
+  z <- tryCatch(get_zstats_interaction(shifted), error = function(e) NA)
+  null_max_interaction[p] <- if (all(!is.na(z))) max_stat(z) else NA
+  if (p %% 10 == 0) message("permutation ", p, " done")
+}
+
+sum(is.na(null_max_interaction))
+```
+
+## Real data model
+```{r}
+observed_z_interaction <- get_zstats_interaction(full_df)
+observed_z_interaction
+length(observed_z_interaction)  # should be 8
+observed_max_interaction <- max_stat(observed_z_interaction)
+observed_max_interaction
+```
+
+## Corrected p-values
+```{r}
+interaction_pvals <- sapply(abs(observed_z_interaction),
+                             function(oz) mean(null_max_interaction >= oz, na.rm = TRUE))
+
+interaction_results <- tibble(
+  term = names(observed_z_interaction),
+  observed_z = observed_z_interaction,
+  p_permutation = interaction_pvals
+) %>% arrange(p_permutation)
+
+interaction_results
+```
+
+```{r}
+full_df %>%
+  group_by(piece) %>%
+  summarise(n = n(), sd_38.5 = sd(modband_38.5, na.rm = TRUE), range_38.5 = diff(range(modband_38.5, na.rm = TRUE)))
+
+
+full_df %>% filter(piece %in% c("WAGNER", "BACH")) %>%
+  ggplot(aes(x = second_in_stim, y = modband_38.5, color = piece)) + geom_line() + facet_wrap(~piece, scales = "free_x")
+```
+
+
+
+

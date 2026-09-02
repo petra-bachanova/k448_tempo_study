@@ -1,5 +1,4 @@
 ---
-
 title: "gee_spike_rate_models"
 output: html_document
 date: "2025-11-03"

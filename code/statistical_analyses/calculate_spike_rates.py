@@ -133,7 +133,7 @@ for _, row in meta.iterrows():
     spikes = load_detected_spikes(sub_spikes_path=spikes_sub_path, sampling_rate=200, channels_path=channels_path, SOZ_analysis=include_soz)
     # Read in time markers
     sub_time_marker_path = f'{project_path}/derivatives/time_markers/{sub}/{ses}/{sub}_{ses}_processed_time_markers.csv'
-    tm = pd.read_csv(sub_time_marker_path)
+    tm: pd.DataFrame = pd.read_csv(sub_time_marker_path)
 
     sr_merged = pd.DataFrame()
     sc_merged = pd.DataFrame()
@@ -153,8 +153,8 @@ for _, row in meta.iterrows():
         for ct in contact_types:
             spikes_ct = spikes_event if ct == "all" else spikes_event[spikes_event[f"spike_in_{ct}"] == "yes"]
 
-            bin_len = 15 if event == "pre-exp baseline" else 15
-            max_dur = None if event == "pre-exp baseline" else 90
+            bin_len = 1 if event == "pre-exp baseline" else 1
+            max_dur = None # if event == "pre-exp baseline" else 90
 
             spike_rates, spike_counts = compute_binned_spike_rates(
                 spike_df=spikes_ct, start_time=event_start, end_time=event_end, 
@@ -183,5 +183,5 @@ for _, row in meta.iterrows():
         sc_merged = pd.concat([sc_merged, sc_event], ignore_index=True)
 
     # Save per participant/session
-    sr_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_rates.csv", index=False)
-    sc_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_counts.csv", index=False)
+    sr_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_rates_1sec.csv", index=False)
+    sc_merged.to_csv(f"{sr_sub_path}/{sub}_{ses}_calculated_spike_counts_1sec.csv", index=False)
