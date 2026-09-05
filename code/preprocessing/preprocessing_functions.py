@@ -162,7 +162,7 @@ def log_rejected_channels(raw, manual_bads, auto_bads, df_auto_clean):
 
 def plot_PSD(df, title, savepath):
     """
-    Plot the power spectral density (between 1 to 40 Hz) of all EEG channels.
+    Plot the power spectral density (between 1 to 80 Hz) of all EEG channels.
 
     Args:
         df (mne.io.Raw): Input EEG data.
